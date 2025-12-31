@@ -1,0 +1,46 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+pubspec.lock
+
+# Build outputs
+build/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/ephemeral/
+
+# Xcode
+*.pbxproj
+*.xcworkspace
+*.xcuserdatad
+*.xcuserdata
+
+# Android/IntelliJ
+*.iml
+.android
+.gradle
+/local.properties
+android/local.properties
+/.idea/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Sensitive
+google-services.json
+ios/Runner/GoogleService-Info.plist
+
+# Logs
+*.log
+
+# Generated files
+**/generated/**
+**/intermediates/**
+**/outputs/**
+**/tmp/**
