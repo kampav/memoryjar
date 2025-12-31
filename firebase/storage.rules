@@ -1,0 +1,103 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Check file size (max 10MB for images, 50MB for videos)
+    function isValidImageSize() {
+      return request.resource.size < 10 * 1024 * 1024;
+    }
+    
+    function isValidVideoSize() {
+      return request.resource.size < 50 * 1024 * 1024;
+    }
+    
+    function isValidAudioSize() {
+      return request.resource.size < 20 * 1024 * 1024;
+    }
+    
+    // Check content type
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+    
+    function isVideo() {
+      return request.resource.contentType.matches('video/.*');
+    }
+    
+    function isAudio() {
+      return request.resource.contentType.matches('audio/.*');
+    }
+    
+    // User profile images
+    match /users/{userId}/profile/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) && isImage() && isValidImageSize();
+      allow delete: if isOwner(userId);
+    }
+    
+    // Family media - memories photos/videos
+    match /families/{familyId}/memories/{memoryId}/{fileName} {
+      // Any authenticated user can read (will be filtered by Firestore rules)
+      allow read: if isAuthenticated();
+      
+      // Authenticated users can upload media
+      allow create: if isAuthenticated() && 
+        ((isImage() && isValidImageSize()) || 
+         (isVideo() && isValidVideoSize()) ||
+         (isAudio() && isValidAudioSize()));
+      
+      // Allow update for replacing files
+      allow update: if isAuthenticated() && 
+        ((isImage() && isValidImageSize()) || 
+         (isVideo() && isValidVideoSize()) ||
+         (isAudio() && isValidAudioSize()));
+      
+      // Allow delete
+      allow delete: if isAuthenticated();
+    }
+    
+    // Thumbnails
+    match /families/{familyId}/thumbnails/{memoryId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isImage() && request.resource.size < 1 * 1024 * 1024;
+      allow delete: if isAuthenticated();
+    }
+    
+    // Voice notes
+    match /families/{familyId}/voice/{memoryId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isAudio() && isValidAudioSize();
+      allow delete: if isAuthenticated();
+    }
+    
+    // Family shared assets (like family photos for the jar)
+    match /families/{familyId}/shared/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isImage() && isValidImageSize();
+      allow delete: if isAuthenticated();
+    }
+    
+    // Temporary uploads (for processing)
+    match /temp/{userId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId) && 
+        (isImage() || isVideo() || isAudio()) && 
+        request.resource.size < 50 * 1024 * 1024;
+      allow delete: if isOwner(userId);
+    }
+    
+    // Deny all other paths by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

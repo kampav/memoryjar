@@ -1,0 +1,135 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Check if user is a family member (members stored in family document as map)
+    function isFamilyMember(familyId) {
+      let family = get(/databases/$(database)/documents/families/$(familyId));
+      return isAuthenticated() && 
+        family.data.members != null &&
+        request.auth.uid in family.data.members;
+    }
+    
+    // Check if user is family admin
+    function isFamilyAdmin(familyId) {
+      let family = get(/databases/$(database)/documents/families/$(familyId));
+      return isAuthenticated() && 
+        family.data.members != null &&
+        request.auth.uid in family.data.members &&
+        family.data.members[request.auth.uid].role == 'admin';
+    }
+    
+    // Get user's family ID
+    function getUserFamilyId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyId;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Users can read their own data
+      allow read: if isOwner(userId);
+      
+      // Users can create their own document on first sign-in
+      allow create: if isOwner(userId);
+      
+      // Users can update their own profile
+      allow update: if isOwner(userId);
+      
+      // Users cannot delete their account directly (use Cloud Function)
+      allow delete: if false;
+      
+      // Family members can read basic profile info of other family members
+      allow read: if isAuthenticated() && 
+        resource.data.familyId != null &&
+        isFamilyMember(resource.data.familyId);
+    }
+    
+    // Families collection
+    match /families/{familyId} {
+      // Any authenticated user can read family (for invite code lookup)
+      allow read: if isAuthenticated();
+      
+      // Any authenticated user can create a family
+      allow create: if isAuthenticated() && 
+        request.resource.data.createdBy == request.auth.uid;
+      
+      // Family members can update (for joining, adding members)
+      // Admins have full control
+      allow update: if isFamilyMember(familyId) || 
+        (isAuthenticated() && request.resource.data.members[request.auth.uid] != null);
+      
+      // Only family admins can delete the family
+      allow delete: if isFamilyAdmin(familyId);
+      
+      // Memories subcollection
+      match /memories/{memoryId} {
+        // Family members can read all memories
+        allow read: if isFamilyMember(familyId);
+        
+        // Family members can create memories
+        allow create: if isFamilyMember(familyId) && 
+          request.resource.data.authorId == request.auth.uid;
+        
+        // Authors can update their own memories, admins can update any
+        allow update: if isFamilyMember(familyId) && 
+          (resource.data.authorId == request.auth.uid || isFamilyAdmin(familyId));
+        
+        // Authors and admins can delete memories
+        allow delete: if isFamilyMember(familyId) && 
+          (resource.data.authorId == request.auth.uid || isFamilyAdmin(familyId));
+        
+        // Comments subcollection
+        match /comments/{commentId} {
+          allow read: if isFamilyMember(familyId);
+          allow create: if isFamilyMember(familyId);
+          allow update: if isFamilyMember(familyId) && 
+            resource.data.authorId == request.auth.uid;
+          allow delete: if isFamilyMember(familyId) && 
+            (resource.data.authorId == request.auth.uid || isFamilyAdmin(familyId));
+        }
+      }
+      
+      // Reflections subcollection (AI-generated content)
+      match /reflections/{reflectionId} {
+        allow read: if isFamilyMember(familyId);
+        // Only Cloud Functions can write reflections
+        allow write: if false;
+      }
+    }
+    
+    // Invite codes collection (for looking up families by invite code)
+    match /inviteCodes/{code} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+    
+    // App configuration (read-only for all authenticated users)
+    match /config/{document} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+    
+    // Achievements/badges definitions
+    match /achievements/{achievementId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+    
+    // User achievements
+    match /userAchievements/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false; // Only Cloud Functions can award achievements
+    }
+  }
+}
