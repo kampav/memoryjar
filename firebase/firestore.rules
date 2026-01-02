@@ -1,135 +1,246 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+    
+    // Check if user is authenticated
     function isAuthenticated() {
       return request.auth != null;
     }
     
+    // Check if user is the document owner
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Check if user is a family member (members stored in family document as map)
-    function isFamilyMember(familyId) {
-      let family = get(/databases/$(database)/documents/families/$(familyId));
+    // Check if user is a member of the jar
+    function isJarMember(jarData) {
       return isAuthenticated() && 
-        family.data.members != null &&
-        request.auth.uid in family.data.members;
+             jarData.members != null && 
+             request.auth.uid in jarData.members;
     }
     
-    // Check if user is family admin
-    function isFamilyAdmin(familyId) {
-      let family = get(/databases/$(database)/documents/families/$(familyId));
-      return isAuthenticated() && 
-        family.data.members != null &&
-        request.auth.uid in family.data.members &&
-        family.data.members[request.auth.uid].role == 'admin';
+    // Check if user has specific role in jar
+    function hasJarRole(jarData, roles) {
+      return isJarMember(jarData) && 
+             jarData.members[request.auth.uid].role in roles;
     }
     
-    // Get user's family ID
-    function getUserFamilyId() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyId;
+    // Check if user is jar owner
+    function isJarOwner(jarData) {
+      return hasJarRole(jarData, ['owner']);
     }
     
-    // Users collection
+    // Check if user is jar admin or owner
+    function isJarAdmin(jarData) {
+      return hasJarRole(jarData, ['owner', 'admin']);
+    }
+    
+    // Check if user can add memories to jar
+    function canAddMemory(jarData) {
+      return hasJarRole(jarData, ['owner', 'admin', 'member']);
+    }
+    
+    // Validate user data on create
+    function isValidNewUser(data) {
+      return data.keys().hasAll(['email', 'displayName', 'createdAt', 'lastActive']) &&
+             data.email is string &&
+             data.displayName is string &&
+             data.displayName.size() >= 2 &&
+             data.displayName.size() <= 50;
+    }
+    
+    // Validate user data on update
+    function isValidUserUpdate(data) {
+      // Prevent modification of critical fields
+      return !data.diff(resource.data).affectedKeys().hasAny(['uid', 'createdAt', 'email']);
+    }
+    
+    // Validate jar data
+    function isValidJar(data) {
+      return data.keys().hasAll(['name', 'type', 'ownerId', 'members', 'createdAt']) &&
+             data.name is string &&
+             data.name.size() >= 1 &&
+             data.name.size() <= 100 &&
+             data.type in ['personal', 'family', 'friends', 'work', 'custom'];
+    }
+    
+    // Validate memory data
+    function isValidMemory(data) {
+      return data.keys().hasAll(['jarId', 'authorId', 'type', 'createdAt']) &&
+             data.type in ['text', 'photo', 'voice', 'video', 'milestone'];
+    }
+    
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
     match /users/{userId} {
-      // Users can read their own data
+      // Users can read their own document
       allow read: if isOwner(userId);
       
-      // Users can create their own document on first sign-in
-      allow create: if isOwner(userId);
+      // Users can create their own document
+      allow create: if isOwner(userId) && isValidNewUser(request.resource.data);
       
-      // Users can update their own profile
-      allow update: if isOwner(userId);
+      // Users can update their own document (with restrictions)
+      allow update: if isOwner(userId) && isValidUserUpdate(request.resource.data);
       
-      // Users cannot delete their account directly (use Cloud Function)
-      allow delete: if false;
+      // Users can delete their own account (GDPR right to erasure)
+      allow delete: if isOwner(userId);
       
-      // Family members can read basic profile info of other family members
-      allow read: if isAuthenticated() && 
-        resource.data.familyId != null &&
-        isFamilyMember(resource.data.familyId);
+      // User's private subcollections
+      match /notifications/{notificationId} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      match /preferences/{prefId} {
+        allow read, write: if isOwner(userId);
+      }
     }
     
-    // Families collection
-    match /families/{familyId} {
-      // Any authenticated user can read family (for invite code lookup)
-      allow read: if isAuthenticated();
+    // ============================================
+    // JARS COLLECTION
+    // ============================================
+    match /jars/{jarId} {
+      // Anyone authenticated can read jar if they're a member
+      allow read: if isAuthenticated() && isJarMember(resource.data);
       
-      // Any authenticated user can create a family
+      // Authenticated users can create jars (they become owner)
       allow create: if isAuthenticated() && 
-        request.resource.data.createdBy == request.auth.uid;
+                       isValidJar(request.resource.data) &&
+                       request.resource.data.ownerId == request.auth.uid &&
+                       request.resource.data.members[request.auth.uid].role == 'owner';
       
-      // Family members can update (for joining, adding members)
-      // Admins have full control
-      allow update: if isFamilyMember(familyId) || 
-        (isAuthenticated() && request.resource.data.members[request.auth.uid] != null);
+      // Only admins/owners can update jar settings
+      allow update: if isJarAdmin(resource.data);
       
-      // Only family admins can delete the family
-      allow delete: if isFamilyAdmin(familyId);
+      // Only owner can delete jar
+      allow delete: if isJarOwner(resource.data);
       
-      // Memories subcollection
-      match /memories/{memoryId} {
-        // Family members can read all memories
-        allow read: if isFamilyMember(familyId);
-        
-        // Family members can create memories
-        allow create: if isFamilyMember(familyId) && 
-          request.resource.data.authorId == request.auth.uid;
-        
-        // Authors can update their own memories, admins can update any
-        allow update: if isFamilyMember(familyId) && 
-          (resource.data.authorId == request.auth.uid || isFamilyAdmin(familyId));
-        
-        // Authors and admins can delete memories
-        allow delete: if isFamilyMember(familyId) && 
-          (resource.data.authorId == request.auth.uid || isFamilyAdmin(familyId));
-        
-        // Comments subcollection
-        match /comments/{commentId} {
-          allow read: if isFamilyMember(familyId);
-          allow create: if isFamilyMember(familyId);
-          allow update: if isFamilyMember(familyId) && 
-            resource.data.authorId == request.auth.uid;
-          allow delete: if isFamilyMember(familyId) && 
-            (resource.data.authorId == request.auth.uid || isFamilyAdmin(familyId));
-        }
-      }
-      
-      // Reflections subcollection (AI-generated content)
-      match /reflections/{reflectionId} {
-        allow read: if isFamilyMember(familyId);
-        // Only Cloud Functions can write reflections
-        allow write: if false;
+      // Jar invites subcollection
+      match /invites/{inviteId} {
+        allow read: if isJarMember(get(/databases/$(database)/documents/jars/$(jarId)).data);
+        allow create: if isJarAdmin(get(/databases/$(database)/documents/jars/$(jarId)).data);
+        allow delete: if isJarAdmin(get(/databases/$(database)/documents/jars/$(jarId)).data);
       }
     }
     
-    // Invite codes collection (for looking up families by invite code)
-    match /inviteCodes/{code} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if false;
-      allow delete: if false;
+    // ============================================
+    // MEMORIES COLLECTION
+    // ============================================
+    match /memories/{memoryId} {
+      // Get the jar document for permission checks
+      function getJar() {
+        return get(/databases/$(database)/documents/jars/$(resource.data.jarId)).data;
+      }
+      
+      function getJarForCreate() {
+        return get(/databases/$(database)/documents/jars/$(request.resource.data.jarId)).data;
+      }
+      
+      // Members can read memories in their jars
+      allow read: if isAuthenticated() && isJarMember(getJar());
+      
+      // Members (not viewers) can create memories
+      allow create: if isAuthenticated() && 
+                       isValidMemory(request.resource.data) &&
+                       request.resource.data.authorId == request.auth.uid &&
+                       canAddMemory(getJarForCreate());
+      
+      // Authors can update their own memories, admins can update any
+      allow update: if isAuthenticated() && 
+                       (resource.data.authorId == request.auth.uid || 
+                        isJarAdmin(getJar()));
+      
+      // Authors can delete their own memories, admins can delete any
+      allow delete: if isAuthenticated() && 
+                       (resource.data.authorId == request.auth.uid || 
+                        isJarAdmin(getJar()));
+      
+      // Memory comments subcollection
+      match /comments/{commentId} {
+        allow read: if isAuthenticated() && 
+                       isJarMember(get(/databases/$(database)/documents/jars/$(get(/databases/$(database)/documents/memories/$(memoryId)).data.jarId)).data);
+        allow create: if isAuthenticated() && 
+                         request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if isAuthenticated() && 
+                                 resource.data.authorId == request.auth.uid;
+      }
+      
+      // Memory reactions subcollection
+      match /reactions/{reactionId} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && reactionId == request.auth.uid;
+      }
     }
     
-    // App configuration (read-only for all authenticated users)
-    match /config/{document} {
-      allow read: if isAuthenticated();
-      allow write: if false;
+    // ============================================
+    // REFLECTIONS COLLECTION (AI-generated)
+    // ============================================
+    match /reflections/{reflectionId} {
+      function getReflectionJar() {
+        return get(/databases/$(database)/documents/jars/$(resource.data.jarId)).data;
+      }
+      
+      // Members can read reflections for their jars
+      allow read: if isAuthenticated() && isJarMember(getReflectionJar());
+      
+      // Only backend/admin can create reflections (via Cloud Functions)
+      allow create: if false;
+      
+      // No one can update or delete reflections
+      allow update, delete: if false;
     }
     
-    // Achievements/badges definitions
-    match /achievements/{achievementId} {
+    // ============================================
+    // INVITES COLLECTION (for joining jars via code)
+    // ============================================
+    match /invites/{inviteCode} {
+      // Anyone authenticated can read invite to join
       allow read: if isAuthenticated();
-      allow write: if false;
+      
+      // Only jar admins can create invites (handled via jar subcollection or functions)
+      allow create: if false;
+      
+      // Invites are managed by Cloud Functions
+      allow update, delete: if false;
     }
     
-    // User achievements
-    match /userAchievements/{userId} {
-      allow read: if isOwner(userId);
-      allow write: if false; // Only Cloud Functions can award achievements
+    // ============================================
+    // GDPR DATA EXPORTS (temporary storage)
+    // ============================================
+    match /exports/{exportId} {
+      // Users can only read their own exports
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      
+      // Exports are created by Cloud Functions only
+      allow create, update, delete: if false;
+    }
+    
+    // ============================================
+    // APP CONFIGURATION (read-only)
+    // ============================================
+    match /config/{configId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Admin only via console
+    }
+    
+    // ============================================
+    // FEEDBACK COLLECTION
+    // ============================================
+    match /feedback/{feedbackId} {
+      // Users can create feedback
+      allow create: if isAuthenticated() && 
+                       request.resource.data.userId == request.auth.uid;
+      
+      // Users can read their own feedback
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      
+      // No updates or deletes from client
+      allow update, delete: if false;
     }
   }
 }

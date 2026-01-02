@@ -1,9 +1,4 @@
-# memoryjar
-A beautiful, family-centric mobile and web application that transforms everyday moments into cherished memories.
-
----
-
-## Local README (appended from local changes)
+# Memory Jar 🫙
 
 A beautiful family memory capture application built with Flutter and Firebase. Create, share, and cherish memories with your loved ones.
 
@@ -96,6 +91,7 @@ lib/
 └── shared/
     ├── models/              # Data models
     └── widgets/             # Reusable widgets
+```
 
 ## Firebase Collections
 
@@ -189,6 +185,10 @@ firebase deploy --only storage
 - Android: `com.familylegacy.memory_jar`
 - iOS: `com.familylegacy.memoryJar`
 
+### Firebase Project
+- Project ID: `memory-jarapp`
+- Storage: `memory-jarapp.firebasestorage.app`
+
 ## Permissions
 
 ### Android (AndroidManifest.xml)
@@ -267,4 +267,3 @@ For issues or feature requests, contact the development team.
 ---
 
 Built with ❤️ using Flutter and Firebase
-

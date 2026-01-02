@@ -2,7 +2,10 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     
-    // Helper functions
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+    
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -11,20 +14,28 @@ service firebase.storage {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Check file size (max 10MB for images, 50MB for videos)
+    // File size limits
     function isValidImageSize() {
-      return request.resource.size < 10 * 1024 * 1024;
+      return request.resource.size < 15 * 1024 * 1024; // 15MB
     }
     
     function isValidVideoSize() {
-      return request.resource.size < 50 * 1024 * 1024;
+      return request.resource.size < 100 * 1024 * 1024; // 100MB
     }
     
     function isValidAudioSize() {
-      return request.resource.size < 20 * 1024 * 1024;
+      return request.resource.size < 25 * 1024 * 1024; // 25MB
     }
     
-    // Check content type
+    function isValidAvatarSize() {
+      return request.resource.size < 5 * 1024 * 1024; // 5MB
+    }
+    
+    function isValidThumbnailSize() {
+      return request.resource.size < 2 * 1024 * 1024; // 2MB
+    }
+    
+    // Content type checks
     function isImage() {
       return request.resource.contentType.matches('image/.*');
     }
@@ -37,65 +48,171 @@ service firebase.storage {
       return request.resource.contentType.matches('audio/.*');
     }
     
-    // User profile images
+    function isValidImageType() {
+      return request.resource.contentType in [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+        'image/heic',
+        'image/heif'
+      ];
+    }
+    
+    function isValidVideoType() {
+      return request.resource.contentType in [
+        'video/mp4',
+        'video/quicktime',
+        'video/x-m4v',
+        'video/webm'
+      ];
+    }
+    
+    function isValidAudioType() {
+      return request.resource.contentType in [
+        'audio/mpeg',
+        'audio/mp4',
+        'audio/m4a',
+        'audio/x-m4a',
+        'audio/wav',
+        'audio/webm',
+        'audio/aac'
+      ];
+    }
+    
+    // ============================================
+    // USER PROFILE IMAGES
+    // ============================================
     match /users/{userId}/profile/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isOwner(userId) && isImage() && isValidImageSize();
+      allow write: if isOwner(userId) && isValidImageType() && isValidAvatarSize();
       allow delete: if isOwner(userId);
     }
     
-    // Family media - memories photos/videos
-    match /families/{familyId}/memories/{memoryId}/{fileName} {
-      // Any authenticated user can read (will be filtered by Firestore rules)
+    // Legacy avatar path support
+    match /users/{userId}/avatar/{fileName} {
       allow read: if isAuthenticated();
-      
-      // Authenticated users can upload media
-      allow create: if isAuthenticated() && 
-        ((isImage() && isValidImageSize()) || 
-         (isVideo() && isValidVideoSize()) ||
-         (isAudio() && isValidAudioSize()));
-      
-      // Allow update for replacing files
-      allow update: if isAuthenticated() && 
-        ((isImage() && isValidImageSize()) || 
-         (isVideo() && isValidVideoSize()) ||
-         (isAudio() && isValidAudioSize()));
-      
-      // Allow delete
+      allow write: if isOwner(userId) && isValidImageType() && isValidAvatarSize();
+      allow delete: if isOwner(userId);
+    }
+    
+    // ============================================
+    // JAR COVER IMAGES
+    // ============================================
+    match /jars/{jarId}/cover/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isValidImageType() && isValidImageSize();
       allow delete: if isAuthenticated();
     }
     
-    // Thumbnails
+    // ============================================
+    // JAR MEMORIES - PHOTOS/VIDEOS/AUDIO
+    // ============================================
+    match /jars/{jarId}/memories/{memoryId}/{fileName} {
+      allow read: if isAuthenticated();
+      
+      allow create: if isAuthenticated() && 
+        ((isValidImageType() && isValidImageSize()) || 
+         (isValidVideoType() && isValidVideoSize()) ||
+         (isValidAudioType() && isValidAudioSize()));
+      
+      allow update: if isAuthenticated() && 
+        ((isValidImageType() && isValidImageSize()) || 
+         (isValidVideoType() && isValidVideoSize()) ||
+         (isValidAudioType() && isValidAudioSize()));
+      
+      allow delete: if isAuthenticated();
+    }
+    
+    // ============================================
+    // MEMORY THUMBNAILS
+    // ============================================
+    match /jars/{jarId}/thumbnails/{memoryId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isValidImageType() && isValidThumbnailSize();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ============================================
+    // VOICE NOTES (separate path)
+    // ============================================
+    match /jars/{jarId}/voice/{memoryId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isValidAudioType() && isValidAudioSize();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ============================================
+    // JAR SHARED ASSETS
+    // ============================================
+    match /jars/{jarId}/shared/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isValidImageType() && isValidImageSize();
+      allow delete: if isAuthenticated();
+    }
+    
+    // ============================================
+    // LEGACY: FAMILY PATHS (backward compatibility)
+    // ============================================
+    match /families/{familyId}/memories/{memoryId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && 
+        ((isImage() && isValidImageSize()) || 
+         (isVideo() && isValidVideoSize()) ||
+         (isAudio() && isValidAudioSize()));
+      allow delete: if isAuthenticated();
+    }
+    
     match /families/{familyId}/thumbnails/{memoryId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isImage() && request.resource.size < 1 * 1024 * 1024;
+      allow write: if isAuthenticated() && isImage() && isValidThumbnailSize();
       allow delete: if isAuthenticated();
     }
     
-    // Voice notes
     match /families/{familyId}/voice/{memoryId}/{fileName} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && isAudio() && isValidAudioSize();
       allow delete: if isAuthenticated();
     }
     
-    // Family shared assets (like family photos for the jar)
     match /families/{familyId}/shared/{fileName} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && isImage() && isValidImageSize();
       allow delete: if isAuthenticated();
     }
     
-    // Temporary uploads (for processing)
+    // ============================================
+    // GDPR DATA EXPORTS
+    // ============================================
+    match /exports/{userId}/{exportId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if false; // Cloud Functions only
+      allow delete: if isOwner(userId);
+    }
+    
+    // ============================================
+    // FEEDBACK ATTACHMENTS
+    // ============================================
+    match /feedback/{feedbackId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isValidImageType() && isValidImageSize();
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // TEMPORARY UPLOADS
+    // ============================================
     match /temp/{userId}/{fileName} {
       allow read: if isOwner(userId);
       allow write: if isOwner(userId) && 
         (isImage() || isVideo() || isAudio()) && 
-        request.resource.size < 50 * 1024 * 1024;
+        request.resource.size < 100 * 1024 * 1024;
       allow delete: if isOwner(userId);
     }
     
-    // Deny all other paths by default
+    // ============================================
+    // DENY ALL OTHER PATHS
+    // ============================================
     match /{allPaths=**} {
       allow read, write: if false;
     }

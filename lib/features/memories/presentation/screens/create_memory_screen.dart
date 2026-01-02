@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -7,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../../core/theme/color_schemes.dart';
 import '../../../../shared/widgets/glass_container.dart';
@@ -182,6 +185,13 @@ class _CreateMemoryScreenState extends ConsumerState<CreateMemoryScreen> {
     });
 
     try {
+      // Create memory document first so uploads can use the memoryId path
+      final memoryRef = FirebaseFirestore.instance
+          .collection('families')
+          .doc(userDoc.familyId!)
+          .collection('memories')
+          .doc();
+
       // Upload images
       final List<String> mediaUrls = [];
       
@@ -190,8 +200,10 @@ class _CreateMemoryScreenState extends ConsumerState<CreateMemoryScreen> {
         final imageId = const Uuid().v4();
         final ref = FirebaseStorage.instance
             .ref()
-            .child('memories')
+            .child('families')
             .child(userDoc.familyId!)
+            .child('memories')
+            .child(memoryRef.id)
             .child('$imageId.jpg');
 
         final uploadTask = ref.putFile(
@@ -209,13 +221,6 @@ class _CreateMemoryScreenState extends ConsumerState<CreateMemoryScreen> {
         final url = await ref.getDownloadURL();
         mediaUrls.add(url);
       }
-
-      // Create memory document
-      final memoryRef = FirebaseFirestore.instance
-          .collection('families')
-          .doc(userDoc.familyId!)
-          .collection('memories')
-          .doc();
 
       await memoryRef.set({
         'authorId': user.uid,
@@ -281,6 +286,119 @@ class _CreateMemoryScreenState extends ConsumerState<CreateMemoryScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  // Debug-only: create a tiny PNG and upload it to verify storage rules
+  Future<void> _runDebugUploadTest() async {
+    if (!kDebugMode) return;
+
+    final user = ref.read(currentUserProvider);
+    final userDoc = ref.read(userDocProvider).value;
+
+    if (user == null || userDoc == null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not signed in')),
+      );
+      return;
+    }
+
+    if (userDoc.familyId == null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No family set')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _uploadProgress = 0;
+    });
+
+    try {
+      final memoryRef = FirebaseFirestore.instance
+          .collection('families')
+          .doc(userDoc.familyId!)
+          .collection('memories')
+          .doc();
+
+      final fileName = '${const Uuid().v4()}.png';
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/$fileName');
+
+      // 1x1 transparent PNG
+      final pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQYV2NgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII=';
+      final bytes = base64Decode(pngBase64);
+      await file.writeAsBytes(bytes, flush: true);
+
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('families')
+          .child(userDoc.familyId!)
+          .child('memories')
+          .child(memoryRef.id)
+          .child(fileName);
+
+      final uploadTask = storageRef.putFile(
+        file,
+        SettableMetadata(contentType: 'image/png'),
+      );
+
+      uploadTask.snapshotEvents.listen((event) {
+        setState(() {
+          if (event.totalBytes > 0)
+            _uploadProgress = event.bytesTransferred / event.totalBytes;
+        });
+      });
+
+      await uploadTask;
+      final url = await storageRef.getDownloadURL();
+
+      await memoryRef.set({
+        'authorId': user.uid,
+        'authorName': userDoc.displayName,
+        'authorAvatarEmoji': userDoc.avatarEmoji,
+        'authorAvatarUrl': userDoc.avatarUrl,
+        'familyId': userDoc.familyId,
+        'content': 'Debug upload',
+        'mediaUrls': [url],
+        'thumbnailUrls': [url],
+        'mood': _selectedMood,
+        'themes': [],
+        'aiTags': [],
+        'privacy': 'family',
+        'allowedViewers': [],
+        'createdAt': FieldValue.serverTimestamp(),
+        'memoryDate': FieldValue.serverTimestamp(),
+        'reactions': {},
+        'commentCount': 0,
+        'isHighlight': false,
+        'yearTag': DateTime.now().year,
+        'monthTag': DateTime.now().month,
+        'weekTag': _getWeekOfYear(DateTime.now()),
+      });
+
+      // Update user stats
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({
+        'stats.totalMemories': FieldValue.increment(1),
+        'stats.lastMemoryDate': FieldValue.serverTimestamp(),
+        'stats.photosCount': FieldValue.increment(1),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Debug upload successful ✅')),
+        );
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Debug upload failed: ${e.toString()}')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -351,6 +469,13 @@ class _CreateMemoryScreenState extends ConsumerState<CreateMemoryScreen> {
                               ),
                             ),
                     ),
+                    // Debug upload button (visible only in debug builds)
+                    if (kDebugMode)
+                      IconButton(
+                        tooltip: 'DEV: Upload test image',
+                        onPressed: _isLoading ? null : _runDebugUploadTest,
+                        icon: const Icon(Icons.bug_report, color: Colors.orange),
+                      ),
                   ],
                 ),
               ).animate().fadeIn(duration: 300.ms),

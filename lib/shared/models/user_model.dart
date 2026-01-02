@@ -4,197 +4,237 @@ class UserModel {
   final String uid;
   final String email;
   final String displayName;
-  final String? avatarEmoji;
   final String? avatarUrl;
-  final String? familyId;
-  final String role;
+  final String? avatarEmoji;
   final bool isAnonymous;
   final DateTime createdAt;
   final DateTime lastActive;
+  final List<String> jarIds;
+  final String? familyId;
+  final List<String> achievements;
+  final bool hasCompletedOnboarding;
+  final bool hasAcceptedTerms;
+  final DateTime? termsAcceptedAt;
   final UserSettings settings;
   final UserStats stats;
-  final List<String> achievements;
 
   UserModel({
     required this.uid,
     required this.email,
     required this.displayName,
-    this.avatarEmoji,
     this.avatarUrl,
-    this.familyId,
-    this.role = 'member',
+    this.avatarEmoji,
     this.isAnonymous = false,
     required this.createdAt,
     required this.lastActive,
-    required this.settings,
-    required this.stats,
+    this.jarIds = const [],
+    this.familyId,
     this.achievements = const [],
-  });
+    this.hasCompletedOnboarding = false,
+    this.hasAcceptedTerms = false,
+    this.termsAcceptedAt,
+    UserSettings? settings,
+    UserStats? stats,
+  }) : settings = settings ?? UserSettings(),
+       stats = stats ?? UserStats();
 
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return UserModel(
-      uid: data['uid'] ?? doc.id,
+      uid: doc.id,
       email: data['email'] ?? '',
-      displayName: data['displayName'] ?? 'User',
-      avatarEmoji: data['avatarEmoji'],
+      displayName: data['displayName'] ?? '',
       avatarUrl: data['avatarUrl'],
-      familyId: data['familyId'],
-      role: data['role'] ?? 'member',
+      avatarEmoji: data['avatarEmoji'],
       isAnonymous: data['isAnonymous'] ?? false,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       lastActive: (data['lastActive'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      jarIds: List<String>.from(data['jarIds'] ?? []),
+      familyId: data['familyId'],
+      achievements: List<String>.from(data['achievements'] ?? []),
+      hasCompletedOnboarding: data['hasCompletedOnboarding'] ?? false,
+      hasAcceptedTerms: data['hasAcceptedTerms'] ?? false,
+      termsAcceptedAt: (data['termsAcceptedAt'] as Timestamp?)?.toDate(),
       settings: UserSettings.fromMap(data['settings'] ?? {}),
       stats: UserStats.fromMap(data['stats'] ?? {}),
-      achievements: List<String>.from(data['achievements'] ?? []),
     );
   }
 
   Map<String, dynamic> toFirestore() {
     return {
-      'uid': uid,
       'email': email,
       'displayName': displayName,
-      'avatarEmoji': avatarEmoji,
       'avatarUrl': avatarUrl,
-      'familyId': familyId,
-      'role': role,
+      'avatarEmoji': avatarEmoji,
       'isAnonymous': isAnonymous,
       'createdAt': Timestamp.fromDate(createdAt),
       'lastActive': Timestamp.fromDate(lastActive),
+        'jarIds': jarIds,
+      'familyId': familyId,
+      'achievements': achievements,
+      'hasCompletedOnboarding': hasCompletedOnboarding,
+      'hasAcceptedTerms': hasAcceptedTerms,
+      'termsAcceptedAt': termsAcceptedAt != null ? Timestamp.fromDate(termsAcceptedAt!) : null,
       'settings': settings.toMap(),
       'stats': stats.toMap(),
-      'achievements': achievements,
     };
   }
 
   UserModel copyWith({
+    String? uid,
+    String? email,
     String? displayName,
-    String? avatarEmoji,
     String? avatarUrl,
-    String? familyId,
-    String? role,
+    String? avatarEmoji,
+    bool? isAnonymous,
+    DateTime? createdAt,
     DateTime? lastActive,
+    List<String>? jarIds,
+    String? familyId,
+    List<String>? achievements,
+    bool? hasCompletedOnboarding,
+    bool? hasAcceptedTerms,
+    DateTime? termsAcceptedAt,
     UserSettings? settings,
     UserStats? stats,
-    List<String>? achievements,
   }) {
     return UserModel(
-      uid: uid,
-      email: email,
+      uid: uid ?? this.uid,
+      email: email ?? this.email,
       displayName: displayName ?? this.displayName,
-      avatarEmoji: avatarEmoji ?? this.avatarEmoji,
       avatarUrl: avatarUrl ?? this.avatarUrl,
-      familyId: familyId ?? this.familyId,
-      role: role ?? this.role,
-      isAnonymous: isAnonymous,
-      createdAt: createdAt,
+      avatarEmoji: avatarEmoji ?? this.avatarEmoji,
+      isAnonymous: isAnonymous ?? this.isAnonymous,
+      createdAt: createdAt ?? this.createdAt,
       lastActive: lastActive ?? this.lastActive,
+      jarIds: jarIds ?? this.jarIds,
+      familyId: familyId ?? this.familyId,
+      achievements: achievements ?? this.achievements,
+      hasCompletedOnboarding: hasCompletedOnboarding ?? this.hasCompletedOnboarding,
+      hasAcceptedTerms: hasAcceptedTerms ?? this.hasAcceptedTerms,
+      termsAcceptedAt: termsAcceptedAt ?? this.termsAcceptedAt,
       settings: settings ?? this.settings,
       stats: stats ?? this.stats,
-      achievements: achievements ?? this.achievements,
     );
   }
 }
 
 class UserSettings {
   final bool notificationsEnabled;
-  final bool dailyReminder;
+  final bool dailyReminderEnabled;
   final String reminderTime;
-  final String theme;
-  final String language;
+  final bool hapticFeedback;
+  final bool soundEffects;
 
   UserSettings({
     this.notificationsEnabled = true,
-    this.dailyReminder = true,
+    this.dailyReminderEnabled = false,
     this.reminderTime = '20:00',
-    this.theme = 'system',
-    this.language = 'en',
+    this.hapticFeedback = true,
+    this.soundEffects = true,
   });
 
   factory UserSettings.fromMap(Map<String, dynamic> map) {
     return UserSettings(
       notificationsEnabled: map['notificationsEnabled'] ?? true,
-      dailyReminder: map['dailyReminder'] ?? true,
+      dailyReminderEnabled: map['dailyReminderEnabled'] ?? false,
       reminderTime: map['reminderTime'] ?? '20:00',
-      theme: map['theme'] ?? 'system',
-      language: map['language'] ?? 'en',
+      hapticFeedback: map['hapticFeedback'] ?? true,
+      soundEffects: map['soundEffects'] ?? true,
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
       'notificationsEnabled': notificationsEnabled,
-      'dailyReminder': dailyReminder,
+      'dailyReminderEnabled': dailyReminderEnabled,
       'reminderTime': reminderTime,
-      'theme': theme,
-      'language': language,
+      'hapticFeedback': hapticFeedback,
+      'soundEffects': soundEffects,
     };
+  }
+
+  UserSettings copyWith({
+    bool? notificationsEnabled,
+    bool? dailyReminderEnabled,
+    String? reminderTime,
+    bool? hapticFeedback,
+    bool? soundEffects,
+  }) {
+    return UserSettings(
+      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+      dailyReminderEnabled: dailyReminderEnabled ?? this.dailyReminderEnabled,
+      reminderTime: reminderTime ?? this.reminderTime,
+      hapticFeedback: hapticFeedback ?? this.hapticFeedback,
+      soundEffects: soundEffects ?? this.soundEffects,
+    );
   }
 }
 
 class UserStats {
   final int totalMemories;
+  final int totalJars;
   final int currentStreak;
   final int longestStreak;
-  final DateTime? lastMemoryDate;
   final int photosCount;
-  final int voiceCount;
   final int textCount;
+  final DateTime? lastMemoryDate;
 
   UserStats({
     this.totalMemories = 0,
+    this.totalJars = 0,
     this.currentStreak = 0,
     this.longestStreak = 0,
-    this.lastMemoryDate,
     this.photosCount = 0,
-    this.voiceCount = 0,
     this.textCount = 0,
+    this.lastMemoryDate,
   });
 
   factory UserStats.fromMap(Map<String, dynamic> map) {
     return UserStats(
       totalMemories: map['totalMemories'] ?? 0,
+      totalJars: map['totalJars'] ?? 0,
       currentStreak: map['currentStreak'] ?? 0,
       longestStreak: map['longestStreak'] ?? 0,
-      lastMemoryDate: (map['lastMemoryDate'] as Timestamp?)?.toDate(),
       photosCount: map['photosCount'] ?? 0,
-      voiceCount: map['voiceCount'] ?? 0,
       textCount: map['textCount'] ?? 0,
+      lastMemoryDate: map['lastMemoryDate'] != null 
+          ? (map['lastMemoryDate'] as Timestamp).toDate() 
+          : null,
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
       'totalMemories': totalMemories,
+      'totalJars': totalJars,
       'currentStreak': currentStreak,
       'longestStreak': longestStreak,
+      'photosCount': photosCount,
+      'textCount': textCount,
       'lastMemoryDate': lastMemoryDate != null 
           ? Timestamp.fromDate(lastMemoryDate!) 
           : null,
-      'photosCount': photosCount,
-      'voiceCount': voiceCount,
-      'textCount': textCount,
     };
   }
 
   UserStats copyWith({
     int? totalMemories,
+    int? totalJars,
     int? currentStreak,
     int? longestStreak,
-    DateTime? lastMemoryDate,
     int? photosCount,
-    int? voiceCount,
     int? textCount,
+    DateTime? lastMemoryDate,
   }) {
     return UserStats(
       totalMemories: totalMemories ?? this.totalMemories,
+      totalJars: totalJars ?? this.totalJars,
       currentStreak: currentStreak ?? this.currentStreak,
       longestStreak: longestStreak ?? this.longestStreak,
-      lastMemoryDate: lastMemoryDate ?? this.lastMemoryDate,
       photosCount: photosCount ?? this.photosCount,
-      voiceCount: voiceCount ?? this.voiceCount,
       textCount: textCount ?? this.textCount,
+      lastMemoryDate: lastMemoryDate ?? this.lastMemoryDate,
     );
   }
 }
